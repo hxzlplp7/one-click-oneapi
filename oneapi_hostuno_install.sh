@@ -114,43 +114,72 @@ case "$PORT_MODE" in
         # 自动添加端口模式
         echo ""
         printf "${Yellow}自动添加端口模式${Font}\n"
-        printf "${Cyan}提示: 脚本将使用 devil 命令自动添加 TCP 端口${Font}\n"
-        printf "请输入要添加的端口号 [默认与监听端口相同 ${PORT}]: "
-        read AUTO_PORT
-        AUTO_PORT=${AUTO_PORT:-$PORT}
+        printf "${Cyan}提示: 脚本将自动生成随机端口并尝试添加${Font}\n"
         
-        # 检查端口是否已被使用
-        printf "${Green}检查端口 ${AUTO_PORT} 是否可用...${Font}\n"
+        # 生成随机端口的函数
+        generate_random_port() {
+            # 生成 10000-60000 范围内的随机端口
+            awk 'BEGIN{srand();print int(rand()*50000)+10000}'
+        }
         
-        # 先尝试添加端口
-        ADD_RESULT=$(devil port add tcp ${AUTO_PORT} 2>&1)
+        # 尝试添加端口
+        MAX_ATTEMPTS=10
+        ATTEMPT=1
+        PORT_ADDED=0
         
-        if echo "$ADD_RESULT" | grep -qi "already"; then
-            printf "${Yellow}端口 ${AUTO_PORT} 已存在，将直接使用${Font}\n"
-            EXTERNAL_PORT=$AUTO_PORT
-        elif echo "$ADD_RESULT" | grep -qi "success\|added\|ok"; then
-            printf "${Green}端口 ${AUTO_PORT} 添加成功${Font}\n"
-            EXTERNAL_PORT=$AUTO_PORT
-        else
-            printf "${Red}端口添加失败: ${ADD_RESULT}${Font}\n"
-            printf "${Yellow}请尝试使用其他端口或手动添加端口${Font}\n"
-            printf "请输入备用端口: "
-            read BACKUP_PORT
-            if [ -n "$BACKUP_PORT" ]; then
-                ADD_RESULT=$(devil port add tcp ${BACKUP_PORT} 2>&1)
+        while [ $ATTEMPT -le $MAX_ATTEMPTS ] && [ $PORT_ADDED -eq 0 ]; do
+            RANDOM_PORT=$(generate_random_port)
+            printf "${Green}尝试 ${ATTEMPT}/${MAX_ATTEMPTS}: 添加端口 ${RANDOM_PORT}...${Font}\n"
+            
+            ADD_RESULT=$(devil port add tcp ${RANDOM_PORT} 2>&1)
+            
+            if echo "$ADD_RESULT" | grep -qi "already"; then
+                printf "${Yellow}端口 ${RANDOM_PORT} 已存在，将直接使用${Font}\n"
+                EXTERNAL_PORT=$RANDOM_PORT
+                PORT_ADDED=1
+            elif echo "$ADD_RESULT" | grep -qi "success\|added\|ok"; then
+                printf "${Green}端口 ${RANDOM_PORT} 添加成功！${Font}\n"
+                EXTERNAL_PORT=$RANDOM_PORT
+                PORT_ADDED=1
+            else
+                printf "${Yellow}端口 ${RANDOM_PORT} 添加失败，尝试下一个...${Font}\n"
+                ATTEMPT=$((ATTEMPT + 1))
+            fi
+        done
+        
+        if [ $PORT_ADDED -eq 0 ]; then
+            printf "${Red}自动添加端口失败（已尝试 ${MAX_ATTEMPTS} 次）${Font}\n"
+            printf "${Yellow}请手动输入一个端口号: ${Font}"
+            read MANUAL_PORT
+            if [ -n "$MANUAL_PORT" ]; then
+                ADD_RESULT=$(devil port add tcp ${MANUAL_PORT} 2>&1)
                 if echo "$ADD_RESULT" | grep -qi "success\|added\|ok\|already"; then
-                    printf "${Green}端口 ${BACKUP_PORT} 添加成功${Font}\n"
-                    EXTERNAL_PORT=$BACKUP_PORT
+                    printf "${Green}端口 ${MANUAL_PORT} 添加成功${Font}\n"
+                    EXTERNAL_PORT=$MANUAL_PORT
                 else
-                    printf "${Red}端口添加依然失败，将使用监听端口 ${PORT}${Font}\n"
+                    printf "${Red}端口添加失败: ${ADD_RESULT}${Font}\n"
+                    printf "${Yellow}将使用监听端口 ${PORT} 作为外部端口${Font}\n"
                     EXTERNAL_PORT=$PORT
                 fi
             else
+                printf "${Yellow}将使用监听端口 ${PORT} 作为外部端口${Font}\n"
                 EXTERNAL_PORT=$PORT
             fi
         fi
         
+        # 同时更新监听端口为外部端口（NAT 环境下建议一致）
+        if [ "$EXTERNAL_PORT" != "$PORT" ]; then
+            printf "${Cyan}是否将监听端口也改为 ${EXTERNAL_PORT}? (y/n) [默认 y]: ${Font}"
+            read sync_port
+            sync_port=${sync_port:-y}
+            if [ "$sync_port" = "y" ] || [ "$sync_port" = "Y" ]; then
+                PORT=$EXTERNAL_PORT
+                printf "${Green}监听端口已同步为: ${PORT}${Font}\n"
+            fi
+        fi
+        
         # 显示当前端口列表
+        echo ""
         printf "${Cyan}当前端口列表:${Font}\n"
         devil port list 2>/dev/null || true
         ;;

@@ -102,11 +102,68 @@ fi
 
 # 外部访问端口 (NAT)
 echo ""
-printf "${Yellow}请输入 Hostuno 分配的外部端口${Font}\n"
-printf "${Cyan}提示: 这是你在控制面板中设置的转发端口${Font}\n"
-printf "外部端口 [如与内部相同请直接回车]: "
-read EXTERNAL_PORT
-EXTERNAL_PORT=${EXTERNAL_PORT:-$PORT}
+printf "${Yellow}请选择端口配置方式${Font}\n"
+printf "${Green}1.${Font} 手动输入端口 (已在面板中添加端口)\n"
+printf "${Green}2.${Font} 自动添加端口 (脚本使用 devil 命令添加)\n"
+printf "选择 [1-2，默认 1]: "
+read PORT_MODE
+PORT_MODE=${PORT_MODE:-1}
+
+case "$PORT_MODE" in
+    2)
+        # 自动添加端口模式
+        echo ""
+        printf "${Yellow}自动添加端口模式${Font}\n"
+        printf "${Cyan}提示: 脚本将使用 devil 命令自动添加 TCP 端口${Font}\n"
+        printf "请输入要添加的端口号 [默认与监听端口相同 ${PORT}]: "
+        read AUTO_PORT
+        AUTO_PORT=${AUTO_PORT:-$PORT}
+        
+        # 检查端口是否已被使用
+        printf "${Green}检查端口 ${AUTO_PORT} 是否可用...${Font}\n"
+        
+        # 先尝试添加端口
+        ADD_RESULT=$(devil port add tcp ${AUTO_PORT} 2>&1)
+        
+        if echo "$ADD_RESULT" | grep -qi "already"; then
+            printf "${Yellow}端口 ${AUTO_PORT} 已存在，将直接使用${Font}\n"
+            EXTERNAL_PORT=$AUTO_PORT
+        elif echo "$ADD_RESULT" | grep -qi "success\|added\|ok"; then
+            printf "${Green}端口 ${AUTO_PORT} 添加成功${Font}\n"
+            EXTERNAL_PORT=$AUTO_PORT
+        else
+            printf "${Red}端口添加失败: ${ADD_RESULT}${Font}\n"
+            printf "${Yellow}请尝试使用其他端口或手动添加端口${Font}\n"
+            printf "请输入备用端口: "
+            read BACKUP_PORT
+            if [ -n "$BACKUP_PORT" ]; then
+                ADD_RESULT=$(devil port add tcp ${BACKUP_PORT} 2>&1)
+                if echo "$ADD_RESULT" | grep -qi "success\|added\|ok\|already"; then
+                    printf "${Green}端口 ${BACKUP_PORT} 添加成功${Font}\n"
+                    EXTERNAL_PORT=$BACKUP_PORT
+                else
+                    printf "${Red}端口添加依然失败，将使用监听端口 ${PORT}${Font}\n"
+                    EXTERNAL_PORT=$PORT
+                fi
+            else
+                EXTERNAL_PORT=$PORT
+            fi
+        fi
+        
+        # 显示当前端口列表
+        printf "${Cyan}当前端口列表:${Font}\n"
+        devil port list 2>/dev/null || true
+        ;;
+    *)
+        # 手动输入端口模式
+        echo ""
+        printf "${Yellow}请输入 Hostuno 分配的外部端口${Font}\n"
+        printf "${Cyan}提示: 这是你在控制面板中设置的转发端口${Font}\n"
+        printf "外部端口 [如与内部相同请直接回车]: "
+        read EXTERNAL_PORT
+        EXTERNAL_PORT=${EXTERNAL_PORT:-$PORT}
+        ;;
+esac
 
 # 数据库类型
 echo ""
